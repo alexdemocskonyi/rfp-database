@@ -1,46 +1,51 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>RFP Search AI</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI-Powered RFP Question Search</title>
   <style>
     body {
-      font-family: sans-serif;
-      padding: 40px;
+      font-family: Arial, sans-serif;
       max-width: 800px;
-      margin: auto;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f9f9f9;
+    }
+    h1 {
+      text-align: center;
     }
     #search-box {
       width: 100%;
       padding: 12px;
       font-size: 16px;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
       border: 1px solid #ccc;
       border-radius: 6px;
     }
-    .result {
-      margin-bottom: 20px;
-      padding: 16px;
+    .card {
+      background: white;
       border: 1px solid #ddd;
       border-radius: 6px;
-      background: #f9f9f9;
+      padding: 16px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     }
-    .result h3 {
-      margin: 0 0 8px;
+    .card strong {
+      display: block;
+      margin-bottom: 4px;
     }
-    .result p {
-      margin: 0 0 4px;
-    }
-    .result small {
-      color: #666;
+    .card em {
+      color: #777;
+      font-size: 0.85em;
     }
   </style>
-  <!-- Load SentenceTransformers -->
+
+  <!-- Load SentenceTransformers (fallback mode for client-side embedding if used) -->
   <script src="https://cdn.jsdelivr.net/npm/sentence-transformers"></script>
 </head>
 <body>
-
-  <h1>Search RFP Answers</h1>
+  <h1>AI-Powered RFP Question Search</h1>
   <input type="text" id="search-box" placeholder="Type your RFP question..." />
   <div id="results"></div>
 
