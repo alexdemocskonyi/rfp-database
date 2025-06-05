@@ -5,19 +5,8 @@ const input = document.getElementById("search-box");
 async function loadData() {
   try {
     const res = await fetch("rfp_data_with_real_embeddings.json");
-    const raw = await res.json();
-
-    // Group answers by question
-    const map = new Map();
-    for (const entry of raw) {
-      if (!map.has(entry.question)) {
-        map.set(entry.question, { question: entry.question, answers: [], embedding: entry.embedding });
-      }
-      map.get(entry.question).answers.push(entry.answer);
-    }
-
-    data = Array.from(map.values());
-    console.log(`✅ Loaded ${data.length} grouped records.`);
+    data = await res.json();
+    console.log(`✅ Loaded ${data.length} records.`);
   } catch (err) {
     console.error("❌ Failed to load data:", err);
   }
@@ -28,10 +17,6 @@ function cosineSimilarity(a, b) {
   const magA = Math.sqrt(a.reduce((sum, ai) => sum + ai * ai, 0));
   const magB = Math.sqrt(b.reduce((sum, bi) => sum + bi * bi, 0));
   return dot / (magA * magB);
-}
-
-function keywordScore(query, question) {
-  return question.toLowerCase().includes(query.toLowerCase()) ? 0.3 : 0;
 }
 
 async function embedQuery(query) {
@@ -51,6 +36,11 @@ async function embedQuery(query) {
   return json.data?.[0]?.embedding || null;
 }
 
+function truncateAnswer(answer) {
+  const lines = answer.split("\n");
+  return lines.length > 3 ? lines.slice(0, 3).join("\n") + "..." : answer;
+}
+
 async function search(query) {
   if (query.length < 4) {
     container.innerHTML = "";
@@ -64,16 +54,20 @@ async function search(query) {
     console.warn("Embedding failed, falling back to keyword only");
   }
 
-  const results = data
-    .map(entry => {
-      const similarity = queryEmbedding ? cosineSimilarity(queryEmbedding, entry.embedding) : 0;
-      const keyword = keywordScore(query, entry.question);
-      return {
-        ...entry,
-        score: similarity + keyword
-      };
-    })
-    .filter(result => result.score >= 0.25)
+  const grouped = {};
+  for (const entry of data) {
+    if (!grouped[entry.question]) grouped[entry.question] = [];
+    grouped[entry.question].push(entry);
+  }
+
+  const results = Object.entries(grouped).map(([question, entries]) => {
+    const similarity = queryEmbedding ? cosineSimilarity(queryEmbedding, entries[0].embedding) : 0;
+    return {
+      question,
+      answers: entries.map(e => e.answer),
+      score: similarity
+    };
+  }).filter(r => r.score >= 0.25)
     .sort((a, b) => b.score - a.score)
     .slice(0, 10);
 
@@ -81,39 +75,28 @@ async function search(query) {
   results.forEach(result => {
     const card = document.createElement("div");
     card.className = "card";
-
-    const answerBlocks = result.answers.map(ans => `<div class="answer-line">${truncateLines(ans)}</div>`).join("");
+    const answersHtml = result.answers.map(answer => {
+      const short = truncateAnswer(answer).replace(/\n/g, '<br>');
+      return `<div class="answer" style="margin-top: 8px;"><div class="short">${short}</div><div class="full" style="display:none; white-space:pre-wrap;">${answer}</div><a href="#" class="toggle">Show more</a></div>`;
+    }).join("<hr>");
 
     card.innerHTML = `
       <strong>Q:</strong> ${result.question}<br>
-      <div class="answers">${answerBlocks}</div>
-      <small>Score: ${result.score.toFixed(3)}</small>
+      ${answersHtml}
+      <br><small>Score: ${result.score.toFixed(3)}</small>
     `;
-
-    // Add toggler to each answer
-    card.querySelectorAll(".answer-line").forEach(div => {
-      const full = div.textContent;
-      if (full.split("\n").length > 3 || full.length > 300) {
-        const short = full.slice(0, 300) + "...";
-        div.textContent = short;
-        const toggle = document.createElement("a");
-        toggle.href = "#";
-        toggle.style.marginLeft = "8px";
-        toggle.textContent = "Show more";
-        toggle.addEventListener("click", e => {
-          e.preventDefault();
-          div.textContent = full;
-        });
-        div.appendChild(toggle);
-      }
-    });
-
     container.appendChild(card);
   });
-}
 
-function truncateLines(text) {
-  return text.split("\n").slice(0, 3).join("\n");
+  document.querySelectorAll(".toggle").forEach(link => {
+    link.addEventListener("click", e => {
+      e.preventDefault();
+      const parent = link.parentElement;
+      parent.querySelector(".short").style.display = "none";
+      parent.querySelector(".full").style.display = "block";
+      link.remove();
+    });
+  });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
