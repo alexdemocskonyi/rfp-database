@@ -1,88 +1,125 @@
 let data = [];
+const container = document.getElementById("results");
+const input = document.getElementById("search-box");
 
 async function loadData() {
   try {
-    const response = await fetch("rfp_data_with_local_embeddings.json");
-    data = await response.json();
-    console.log(`✅ Loaded ${data.length} records.`);
+    const res = await fetch("rfp_data_with_real_embeddings.json");
+    const raw = await res.json();
+
+    // Group answers by question
+    const map = new Map();
+    for (const entry of raw) {
+      if (!map.has(entry.question)) {
+        map.set(entry.question, { question: entry.question, answers: [], embedding: entry.embedding });
+      }
+      map.get(entry.question).answers.push(entry.answer);
+    }
+
+    data = Array.from(map.values());
+    console.log(`✅ Loaded ${data.length} grouped records.`);
   } catch (err) {
     console.error("❌ Failed to load data:", err);
   }
 }
 
-// Utility to normalize strings
-function normalize(str) {
-  return str.toLowerCase().replace(/[^a-z0-9]/gi, " ");
-}
-
-// Simple keyword scoring fallback
-function keywordScore(query, text) {
-  const qWords = normalize(query).split(/\s+/);
-  const tWords = normalize(text).split(/\s+/);
-  let score = 0;
-  qWords.forEach((q) => {
-    if (tWords.includes(q)) score += 1;
-  });
-  return score / qWords.length;
-}
-
-// Main search function
-async function embedQuery(query) {
-  try {
-    const model = await window.sentenceTransformers.load("all-MiniLM-L6-v2");
-    const embedding = await model.embed(query);
-    return embedding;
-  } catch (err) {
-    console.error("Embedding failed. Falling back to keywords.");
-    return null;
-  }
-}
-
-// Cosine similarity
 function cosineSimilarity(a, b) {
   const dot = a.reduce((sum, ai, i) => sum + ai * b[i], 0);
-  const normA = Math.sqrt(a.reduce((sum, ai) => sum + ai * ai, 0));
-  const normB = Math.sqrt(b.reduce((sum, bi) => sum + bi * bi, 0));
-  return dot / (normA * normB);
+  const magA = Math.sqrt(a.reduce((sum, ai) => sum + ai * ai, 0));
+  const magB = Math.sqrt(b.reduce((sum, bi) => sum + bi * bi, 0));
+  return dot / (magA * magB);
+}
+
+function keywordScore(query, question) {
+  return question.toLowerCase().includes(query.toLowerCase()) ? 0.3 : 0;
+}
+
+async function embedQuery(query) {
+  const res = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer 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"
+    },
+    body: JSON.stringify({
+      input: query,
+      model: "text-embedding-3-small"
+    })
+  });
+
+  const json = await res.json();
+  return json.data?.[0]?.embedding || null;
 }
 
 async function search(query) {
-  const container = document.getElementById("results");
-  container.innerHTML = "";
+  if (query.length < 4) {
+    container.innerHTML = "";
+    return;
+  }
 
   let queryEmbedding = null;
   try {
-    const model = await window.sentenceTransformers.load("all-MiniLM-L6-v2");
-    queryEmbedding = await model.embed(query);
-  } catch {
-    console.warn("AI embedding failed. Using keyword fallback.");
+    queryEmbedding = await embedQuery(query);
+  } catch (err) {
+    console.warn("Embedding failed, falling back to keyword only");
   }
 
-  const scored = data.map((entry) => {
-    const sim = queryEmbedding && entry.embedding
-      ? cosineSimilarity(queryEmbedding, entry.embedding)
-      : 0;
-    const keyScore = keywordScore(query, entry.question);
-    return { ...entry, score: sim + keyScore };
-  });
+  const results = data
+    .map(entry => {
+      const similarity = queryEmbedding ? cosineSimilarity(queryEmbedding, entry.embedding) : 0;
+      const keyword = keywordScore(query, entry.question);
+      return {
+        ...entry,
+        score: similarity + keyword
+      };
+    })
+    .filter(result => result.score >= 0.25)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10);
 
-  scored.sort((a, b) => b.score - a.score);
-  const top = scored.slice(0, 10);
-
-  top.forEach((res) => {
+  container.innerHTML = "";
+  results.forEach(result => {
     const card = document.createElement("div");
     card.className = "card";
+
+    const answerBlocks = result.answers.map(ans => `<div class="answer-line">${truncateLines(ans)}</div>`).join("");
+
     card.innerHTML = `
-      <strong>Q:</strong> ${res.question}<br>
-      <strong>Answer:</strong> ${res.answer}<br>
-      <em>Score: ${res.score.toFixed(3)}</em>
+      <strong>Q:</strong> ${result.question}<br>
+      <div class="answers">${answerBlocks}</div>
+      <small>Score: ${result.score.toFixed(3)}</small>
     `;
+
+    // Add toggler to each answer
+    card.querySelectorAll(".answer-line").forEach(div => {
+      const full = div.textContent;
+      if (full.split("\n").length > 3 || full.length > 300) {
+        const short = full.slice(0, 300) + "...";
+        div.textContent = short;
+        const toggle = document.createElement("a");
+        toggle.href = "#";
+        toggle.style.marginLeft = "8px";
+        toggle.textContent = "Show more";
+        toggle.addEventListener("click", e => {
+          e.preventDefault();
+          div.textContent = full;
+        });
+        div.appendChild(toggle);
+      }
+    });
+
     container.appendChild(card);
   });
 }
 
+function truncateLines(text) {
+  return text.split("\n").slice(0, 3).join("\n");
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   loadData();
-  const input = document.getElementById("search-box");
-  input.addEventListener("input", (e) => search(e.target.value));
+  input.addEventListener("input", e => {
+    const query = e.target.value.trim();
+    search(query);
+  });
 });
