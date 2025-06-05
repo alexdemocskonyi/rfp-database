@@ -1,3 +1,5 @@
+// script.js — Final drop-in with all fixes
+
 let data = [];
 const container = document.getElementById("results");
 const input = document.getElementById("search-box");
@@ -19,6 +21,15 @@ function cosineSimilarity(a, b) {
   return dot / (magA * magB);
 }
 
+function keywordScore(query, text) {
+  return text.toLowerCase().includes(query.toLowerCase()) ? 0.3 : 0;
+}
+
+function highlightMatch(text, query) {
+  const regex = new RegExp(query, "gi");
+  return text.replace(regex, match => `<mark>${match}</mark>`);
+}
+
 async function embedQuery(query) {
   const res = await fetch("https://api.openai.com/v1/embeddings", {
     method: "POST",
@@ -26,19 +37,11 @@ async function embedQuery(query) {
       "Content-Type": "application/json",
       "Authorization": "Bearer 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"
     },
-    body: JSON.stringify({
-      input: query,
-      model: "text-embedding-3-small"
-    })
+    body: JSON.stringify({ input: query, model: "text-embedding-3-small" })
   });
 
   const json = await res.json();
   return json.data?.[0]?.embedding || null;
-}
-
-function truncateAnswer(answer) {
-  const lines = answer.split("\n");
-  return lines.length > 3 ? lines.slice(0, 3).join("\n") + "..." : answer;
 }
 
 async function search(query) {
@@ -51,51 +54,41 @@ async function search(query) {
   try {
     queryEmbedding = await embedQuery(query);
   } catch (err) {
-    console.warn("Embedding failed, falling back to keyword only");
+    console.warn("⚠️ Embedding failed, falling back to keyword only");
   }
 
-  const grouped = {};
+  const scores = {};
   for (const entry of data) {
-    if (!grouped[entry.question]) grouped[entry.question] = [];
-    grouped[entry.question].push(entry);
+    const similarity = queryEmbedding ? cosineSimilarity(queryEmbedding, entry.embedding) : 0;
+    const keyword = keywordScore(query, entry.question);
+    const score = similarity + keyword;
+    if (score < 0.25) continue;
+    const key = entry.question.trim();
+    if (!scores[key]) scores[key] = [];
+    scores[key].push({ ...entry, score });
   }
 
-  const results = Object.entries(grouped).map(([question, entries]) => {
-    const similarity = queryEmbedding ? cosineSimilarity(queryEmbedding, entries[0].embedding) : 0;
-    return {
-      question,
-      answers: entries.map(e => e.answer),
-      score: similarity
-    };
-  }).filter(r => r.score >= 0.25)
+  const ranked = Object.entries(scores)
+    .map(([question, results]) => {
+      results.sort((a, b) => b.score - a.score);
+      return { question, answers: results, score: results[0].score };
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, 10);
 
   container.innerHTML = "";
-  results.forEach(result => {
+  ranked.forEach(group => {
     const card = document.createElement("div");
     card.className = "card";
-    const answersHtml = result.answers.map(answer => {
-      const short = truncateAnswer(answer).replace(/\n/g, '<br>');
-      return `<div class="answer" style="margin-top: 8px;"><div class="short">${short}</div><div class="full" style="display:none; white-space:pre-wrap;">${answer}</div><a href="#" class="toggle">Show more</a></div>`;
-    }).join("<hr>");
-
+    const preview = group.answers.slice(0, 1).map(ans => `<strong>Answer:</strong> ${highlightMatch(ans.answer, query)}`).join("<br>");
+    const details = group.answers.map(ans => `<li>${highlightMatch(ans.answer, query)} <em>(Score: ${ans.score.toFixed(3)})</em></li>`).join("");
     card.innerHTML = `
-      <strong>Q:</strong> ${result.question}<br>
-      ${answersHtml}
-      <br><small>Score: ${result.score.toFixed(3)}</small>
+      <details>
+        <summary><strong>Q:</strong> ${highlightMatch(group.question, query)}</summary>
+        <div><ul>${details}</ul></div>
+      </details>
     `;
     container.appendChild(card);
-  });
-
-  document.querySelectorAll(".toggle").forEach(link => {
-    link.addEventListener("click", e => {
-      e.preventDefault();
-      const parent = link.parentElement;
-      parent.querySelector(".short").style.display = "none";
-      parent.querySelector(".full").style.display = "block";
-      link.remove();
-    });
   });
 }
 
